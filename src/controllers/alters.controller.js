@@ -1,8 +1,13 @@
 import { User } from "../models/user.model.js";
 import redis from "redis";
 import axios from "axios";
+import { sendAlertEmail } from "../config/nodemailer.js";
+
 const redisClient = redis.createClient({ url: process.env.REDIS_URL });
-redisClient.connect();
+redisClient
+  .connect()
+  .then(() => console.log("Connected to Redis"))
+  .catch((err) => console.error("Error connecting to Redis:", err));
 
 const COINGECKO_API_URL = process.env.COINGECKO_API_URL;
 const setAlert = async (req, res) => {
@@ -65,7 +70,7 @@ async function checkAlerts() {
     // Fetch all users with alerts
     const users = await User.find();
 
-    users.forEach((user) => {
+    for (const user of users) {
       const { crypto, threshold } = user.alert;
       const currentPrice = prices[crypto]?.usd;
 
@@ -74,8 +79,12 @@ async function checkAlerts() {
           `Alert: ${crypto} has reached the threshold of ${threshold} USD for user ${user.email}`
         );
         // Send notification or email here
+        await sendAlertEmail(user.email, crypto, threshold, currentPrice);
+
+        // Remove the alert after sending the notification
+        await User.findByIdAndUpdate(user._id, { $unset: { alert: "" } });
       }
-    });
+    }
   }
 }
 
@@ -102,4 +111,19 @@ const getAlerts = async (req, res) => {
     });
   }
 };
-export { checkAlerts, setAlert, getAlerts };
+
+const testingMail = async (req, res) => {
+  try {
+    sendAlertEmail("rupzkumar5@gmail.com", "bitcoin", "5000", "5003");
+    res.json({
+      success: true,
+    });
+  } catch (error) {
+    console.log(error);
+
+    res.json({
+      success: false,
+    });
+  }
+};
+export { checkAlerts, setAlert, getAlerts, testingMail };

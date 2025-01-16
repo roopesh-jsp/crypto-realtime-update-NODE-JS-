@@ -1,24 +1,18 @@
 import axios from "axios";
+import redis from "redis";
 
-import redisClient from "../config/redis.js";
+const redisClient = redis.createClient({ url: process.env.REDIS_URL });
+redisClient
+  .connect()
+  .then(() => console.log("Connected to Redis"))
+  .catch((err) => console.error("Error connecting to Redis:", err));
+
 const COINGECKO_API_URL = "https://api.coingecko.com/api/v3/coins/markets";
+const cacheKey = "top10Cryptos";
 
-const getTop10 = async (req, res) => {
-  const cacheKey = "top10Cryptos";
-  console.log("gettop10");
-
+// Fetch and update prices every minute
+const fetchAndUpdatePrices = async () => {
   try {
-    // Check if the data is cached in Redis
-    const cachedData = await redisClient.get(cacheKey);
-    if (cachedData) {
-      const cryptos = JSON.parse(cachedData);
-      return res.json({
-        success: true,
-        cryptos,
-      });
-    }
-
-    // If not cached, fetch from the API
     const response = await axios.get(COINGECKO_API_URL, {
       params: {
         vs_currency: "usd",
@@ -30,9 +24,35 @@ const getTop10 = async (req, res) => {
 
     const cryptos = response.data;
     await redisClient.setEx(cacheKey, 60, JSON.stringify(cryptos)); // Cache for 60 seconds
-    return res.json({
-      success: true,
-      cryptos,
+    console.log("Top 10 cryptos updated in cache");
+  } catch (error) {
+    console.error("Error updating top 10 cryptos in cache:", error);
+  }
+};
+
+// Run the fetchAndUpdatePrices function every 60 seconds
+setInterval(fetchAndUpdatePrices, 60000); // 1 minute interval
+
+// Initial fetch when the server starts
+fetchAndUpdatePrices();
+
+const getTop10 = async (req, res) => {
+  const cacheKey = "top10Cryptos";
+
+  try {
+    // Get the data directly from Redis (which is updated every minute)
+    const cachedData = await redisClient.get(cacheKey);
+    if (cachedData) {
+      const cryptos = JSON.parse(cachedData);
+      return res.json({
+        success: true,
+        cryptos,
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Real-time data not available",
     });
   } catch (error) {
     console.error("Error fetching top 10 cryptos:", error);
@@ -43,17 +63,15 @@ const getTop10 = async (req, res) => {
   }
 };
 
-// Fetch details for a specific cryptocurrency by its ID
 const getCrypto = async (req, res) => {
   const cryptoId = req.params.id;
   const cacheKey = `crypto_${cryptoId}`;
 
   try {
-    // Check cache first
+    // Get the cached data from Redis
     const cachedData = await redisClient.get(cacheKey);
     if (cachedData) {
-      console.log(cachedData);
-
+      // If data exists in cache, return it
       const crypto = JSON.parse(cachedData);
       return res.json({
         success: true,
@@ -61,24 +79,33 @@ const getCrypto = async (req, res) => {
       });
     }
 
-    // If not cached, fetch from the API
-    const response = await axios.get(`${COINGECKO_API_URL}`, {
+    // If data is not available in cache, fetch it from CoinGecko API
+    const response = await axios.get(COINGECKO_API_URL, {
       params: {
         ids: cryptoId,
         vs_currency: "usd",
       },
     });
 
-    const cryptoDetails = response.data[0]; // Since we fetch by ID, it's a single item
-    await redisClient.setEx(cacheKey, 60, JSON.stringify(cryptoDetails)); // Cache for 60 seconds
-    const crypto = cryptoDetails;
-    return res.json({
-      success: true,
-      crypto,
-    });
+    if (response.data && response.data.length > 0) {
+      const cryptoDetails = response.data[0];
+
+      // Cache the fetched data in Redis for 60 seconds
+      await redisClient.setEx(cacheKey, 60, JSON.stringify(cryptoDetails));
+
+      return res.json({
+        success: true,
+        crypto: cryptoDetails,
+      });
+    } else {
+      return res.status(404).json({
+        success: false,
+        message: "Cryptocurrency not found.",
+      });
+    }
   } catch (error) {
-    console.error("Error fetching top 10 cryptos:", error);
-    return res.json({
+    console.error("Error fetching crypto data:", error);
+    return res.status(500).json({
       success: false,
       message: error.message,
     });
