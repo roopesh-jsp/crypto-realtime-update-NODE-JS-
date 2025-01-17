@@ -43,6 +43,8 @@ const getTop10 = async (req, res) => {
     // Get the data directly from Redis (which is updated every minute)
     const cachedData = await redisClient.get(cacheKey);
     if (cachedData) {
+      console.log("from redis");
+
       const cryptos = JSON.parse(cachedData);
       return res.json({
         success: true,

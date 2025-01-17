@@ -95,12 +95,13 @@ const getAlerts = async (req, res) => {
     if (!user) {
       throw new Error("no user found");
     }
+    // console.log(user, user.crypto, user.threshold);
 
     res.json({
       success: true,
       data: {
-        crypto: user.crypto,
-        threshold: user.threshold,
+        crypto: user.alert.crypto,
+        threshold: user.alert.threshold,
       },
     });
   } catch (error) {
